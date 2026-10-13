@@ -199,12 +199,12 @@ Multi-Turn Analysis: Turn-by-turn hallucination degradation ($T_1 \to T_4$) and 
 
 If you use this benchmark, code, or findings in your research, please cite our paper:
 
-   @article{fabricating_certainty2026,
-     title={Fabricating Certainty: Analysis of Epistemic Humility through Automated Factorial Pipeline},
-     author={Anonymous author},
-     journal={arXiv preprint},
-     year={2026}
-   }
+      @article{fabricating_certainty2026,
+        title={Fabricating Certainty: Analysis of Epistemic Humility through Automated Factorial Pipeline},
+        author={Anonymous author},
+        journal={arXiv preprint},
+        year={2026}
+      }
 
 ## 📄 License
 
