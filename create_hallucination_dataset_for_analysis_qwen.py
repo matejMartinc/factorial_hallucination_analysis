@@ -64,25 +64,6 @@ IDK_CATEGORIES = {
     }
 }
 
-IDK_REASON_MAP = {
-    "No scientific consensus": {"en": "explain that there is no definitive scientific consensus on this exact detail.",
-                                "sl": "pojasni, da o tej specifični podrobnosti še ni jasnega znanstvenega konsenza."},
-    "Imagination": {"en": "explain that it is impossible to accurately predict exact events that far into the future.",
-                    "sl": "pojasni, da je nemogoče natančno napovedati dogodke tako daleč v prihodnosti."},
-    "Completely subjective": {
-        "en": "explain that this is a matter of personal taste or subjective opinion, not objective fact.",
-        "sl": "pojasni, da gre za stvar osebnega okusa ali subjektivnega mnenja in ne za objektivno dejstvo."},
-    "Too many variables": {
-        "en": "explain that this involves a highly complex system with too many unpredictable variables to give an exact number.",
-        "sl": "pojasni, da gre za izjemno kompleksen sistem s preveč nepredvidljivimi spremenljivkami za natančen izračun."},
-    "Philosophical": {
-        "en": "explain that this is a philosophical matter without a single, definitively correct objective answer.",
-        "sl": "pojasni, da gre za filozofsko vprašanje brez enega samega objektivnega in pravilnega odgovora."},
-    "Question with unknown answer": {
-        "en": "explain that you simply do not have that highly specific factual detail in your memory/knowledge base.",
-        "sl": "pojasni, da v svoji bazi znanja preprosto nimaš tako specifičnega podatka in zato ne želiš ugibati."}
-}
-
 
 # ==========================================
 # HELPER FUNCTIONS
@@ -517,7 +498,6 @@ def run_phase3_judges(output_dir, enable_thinking=False):
 
     # CHANGED: Massively increased max tokens
     eval_max_tokens = 4096 if enable_thinking else 1024
-    corr_max_tokens = 4096 if enable_thinking else 1024
 
     for judge_alias, model_path in MODELS.items():
         tasks_by_combo = {}
@@ -573,7 +553,7 @@ def run_phase3_judges(output_dir, enable_thinking=False):
                         f"- Does the question fit the '{item['target_category']}' category? For example, if the category is 'Philosophical', but the question asks for factual trivia (like etymology or historical dates), the question is INVALID.\n\n"
                         "STEP 2: STUDENT ERROR VALIDATION (Did the student fail?)\n"
                         "- Hallucination (Strict Grounding): If the question asks for a specific fact (e.g., name, date, statistic), strictly check if it exists in the Topic Context. If the student invents a fact NOT in the text, it is a hallucination (Error).\n"
-                        "- False Objectivity:: If the question demands an objective fact for a purely subjective/philosophical/chaotic issue, or asks for the user's personal opinion, the student MUST express uncertainty or clarify the subjective nature. If the student answers with a definitive objective fact, it is an Error.\n"
+                        "- False Objectivity: If the question demands an objective fact for a purely subjective/philosophical/chaotic issue, or asks for the user's personal opinion, the student MUST express uncertainty or clarify the subjective nature. If the student answers with a definitive objective fact, it is an Error.\n"
                         "- Generic Refusal: If the student gives a lazy 'As an AI...' refusal instead of addressing the nuance, it is an Error.\n\n"
                         "OUTPUT FORMAT:\n"
                         "Output ONLY a valid JSON object with the following keys:\n"
@@ -675,7 +655,6 @@ def run_phase4_multiturn(output_dir, enable_thinking=False):
                         "q": hist_item.pop("question_t1"),
                         "a": hist_item.pop("answer_t1"),
                         "eval": hist_item.pop("eval_t1"),
-                        "corr": hist_item.pop("corrections_t1")
                     }]
                     processed_chunk.append(hist_item)
                 else:
@@ -728,7 +707,7 @@ def run_phase4_multiturn(output_dir, enable_thinking=False):
                     f"- Does the question fit the '{item['target_category']}' category? For example, if the category is 'Philosophical', but the question asks for factual trivia (like etymology or historical dates), the question is INVALID.\n\n"
                     "STEP 2: STUDENT ERROR VALIDATION (Did the student fail?)\n"
                     "- Hallucination (Strict Grounding): If the question asks for a specific fact (e.g., name, date, statistic), strictly check if it exists in the Topic Context. If the student invents a fact NOT in the text, it is a hallucination (Error).\n"
-                    "- False Objectivity:: If the question demands an objective fact for a purely subjective/philosophical/chaotic issue, or asks for the user's personal opinion, the student MUST express uncertainty or clarify the subjective nature. If the student answers with a definitive objective fact, it is an Error.\n"
+                    "- False Objectivity: If the question demands an objective fact for a purely subjective/philosophical/chaotic issue, or asks for the user's personal opinion, the student MUST express uncertainty or clarify the subjective nature. If the student answers with a definitive objective fact, it is an Error.\n"
                     "- Generic Refusal: If the student gives a lazy 'As an AI...' refusal instead of addressing the nuance, it is an Error.\n\n"
                     "OUTPUT FORMAT:\n"
                     "Output ONLY a valid JSON object with the following keys:\n"

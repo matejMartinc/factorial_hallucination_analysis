@@ -54,6 +54,13 @@ def fleiss_kappa_binary(ratings):
     return (P_bar - P_e_bar) / (1 - P_e_bar)
 
 
+def calc_all_match(list1, list2, list3):
+    """Calculates the percentage where all 3 judges perfectly agree."""
+    if len(list1) == 0: return 0.0
+    matches = sum(1 for a, b, c in zip(list1, list2, list3) if a == b == c)
+    return (matches / len(list1)) * 100
+
+
 def calc_pairwise(list1, list2):
     """Returns (accuracy_percentage, cohens_kappa)"""
     if len(list1) == 0: return 0.0, 0.0
@@ -71,20 +78,22 @@ def calc_pairwise(list1, list2):
 
 
 def get_metrics(subset, keys):
-    """Calculates Fleiss and 3 Pairwise metrics for a given subset of data."""
+    """Calculates Fleiss, All-3 Match, and 3 Pairwise metrics for a given subset of data."""
     k1, k2, k3 = keys
     if not subset:
-        return 0.0, (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)
+        return 0.0, 0.0, (0.0, 0.0), (0.0, 0.0), (0.0, 0.0)
 
     ratings = [(r[k1], r[k2], r[k3]) for r in subset]
     f_k = fleiss_kappa_binary(ratings)
 
     l1, l2, l3 = [r[k1] for r in subset], [r[k2] for r in subset], [r[k3] for r in subset]
+
+    all_match = calc_all_match(l1, l2, l3)
     p1 = calc_pairwise(l1, l2)  # Gemma vs Qwen NT
     p2 = calc_pairwise(l1, l3)  # Gemma vs Qwen T
     p3 = calc_pairwise(l2, l3)  # Qwen NT vs Qwen T
 
-    return f_k, p1, p2, p3
+    return f_k, all_match, p1, p2, p3
 
 
 def format_pair(pair, is_highest=False, is_lowest=False):
@@ -109,14 +118,15 @@ def format_pair(pair, is_highest=False, is_lowest=False):
 def generate_combined_latex_table(title, label, data, keys_v, keys_e):
     """
     Generates a combined LaTeX table with Validity (Val.) and Error (Err.) side-by-side.
+    Includes an "All 3 Match" column.
     Bolds the highest pairwise match rate and italicizes the lowest in each row.
     """
     langs = sorted(list(set(row['lang'] for row in data if row.get('lang'))))
     cats = sorted(list(set(row['category'] for row in data if row.get('category'))))
 
     def format_combined_row(name, m_v, m_e):
-        f_v, p1_v, p2_v, p3_v = m_v
-        f_e, p1_e, p2_e, p3_e = m_e
+        f_v, a_v, p1_v, p2_v, p3_v = m_v
+        f_e, a_e, p1_e, p2_e, p3_e = m_e
 
         # Find min and max match rates for Validity
         v_matches = [p1_v[0], p2_v[0], p3_v[0]]
@@ -135,6 +145,7 @@ def generate_combined_latex_table(title, label, data, keys_v, keys_e):
         s_p3_e = format_pair(p3_e, is_highest=(p3_e[0] == max_e), is_lowest=(p3_e[0] == min_e))
 
         return (f"{name} & {f_v:.3f} & {f_e:.3f} & "
+                f"{a_v:.1f}\\% & {a_e:.1f}\\% & "
                 f"{s_p1_v} & {s_p1_e} & "
                 f"{s_p2_v} & {s_p2_e} & "
                 f"{s_p3_v} & {s_p3_e} \\\\")
@@ -143,14 +154,15 @@ def generate_combined_latex_table(title, label, data, keys_v, keys_e):
         "\\begin{table*}[htbp]",
         "\\centering",
         "\\resizebox{\\textwidth}{!}{",
-        "\\begin{tabular}{l cc cc cc cc}",
+        "\\begin{tabular}{l cc cc cc cc cc}",
         "\\toprule",
         "& \\multicolumn{2}{c}{\\textbf{Fleiss $\\kappa$}} "
+        "& \\multicolumn{2}{c}{\\textbf{All 3 Match}} "
         "& \\multicolumn{2}{c}{\\textbf{G27B vs Q32B-NT}} "
         "& \\multicolumn{2}{c}{\\textbf{G27B vs Q32B-T}} "
         "& \\multicolumn{2}{c}{\\textbf{Q32B-NT vs Q32B-T}} \\\\",
-        "\\cmidrule(lr){2-3} \\cmidrule(lr){4-5} \\cmidrule(lr){6-7} \\cmidrule(lr){8-9}",
-        "\\textbf{Subset} & \\textbf{Val.} & \\textbf{Err.} & \\textbf{Val.} & \\textbf{Err.} & \\textbf{Val.} & \\textbf{Err.} & \\textbf{Val.} & \\textbf{Err.} \\\\",
+        "\\cmidrule(lr){2-3} \\cmidrule(lr){4-5} \\cmidrule(lr){6-7} \\cmidrule(lr){8-9} \\cmidrule(lr){10-11}",
+        "\\textbf{Subset} & \\textbf{Val.} & \\textbf{Err.} & \\textbf{Val.} & \\textbf{Err.} & \\textbf{Val.} & \\textbf{Err.} & \\textbf{Val.} & \\textbf{Err.} & \\textbf{Val.} & \\textbf{Err.} \\\\",
         "\\midrule"
     ]
 
@@ -161,7 +173,7 @@ def generate_combined_latex_table(title, label, data, keys_v, keys_e):
     latex.append("\\midrule")
 
     # BY LANGUAGE
-    latex.append("\\textit{By Language} & & & & & & & & \\\\")
+    latex.append("\\textit{By Language} & & & & & & & & & & \\\\")
     for l in langs:
         subset = [r for r in data if r.get('lang') == l]
         m_v = get_metrics(subset, keys_v)
@@ -170,7 +182,7 @@ def generate_combined_latex_table(title, label, data, keys_v, keys_e):
     latex.append("\\midrule")
 
     # BY CATEGORY
-    latex.append("\\textit{By Category} & & & & & & & & \\\\")
+    latex.append("\\textit{By Category} & & & & & & & & & & \\\\")
     for c in cats:
         subset = [r for r in data if r.get('category') == c]
         m_v = get_metrics(subset, keys_v)
@@ -192,13 +204,14 @@ def generate_combined_latex_table(title, label, data, keys_v, keys_e):
 def generate_single_latex_table(title, label, data, keys):
     """
     Generates a single-metric LaTeX table (used for Valid-Questions Only).
+    Includes an "All 3 Match" column.
     Bolds the highest and italicizes the lowest pairwise match rate in each row.
     """
     langs = sorted(list(set(row['lang'] for row in data if row.get('lang'))))
     cats = sorted(list(set(row['category'] for row in data if row.get('category'))))
 
     def format_row(name, m):
-        f_k, p1, p2, p3 = m
+        f_k, a_match, p1, p2, p3 = m
 
         # Find min and max match rate
         matches = [p1[0], p2[0], p3[0]]
@@ -208,15 +221,15 @@ def generate_single_latex_table(title, label, data, keys):
         s_p2 = format_pair(p2, is_highest=(p2[0] == max_m), is_lowest=(p2[0] == min_m))
         s_p3 = format_pair(p3, is_highest=(p3[0] == max_m), is_lowest=(p3[0] == min_m))
 
-        return f"{name} & {f_k:.3f} & {s_p1} & {s_p2} & {s_p3} \\\\"
+        return f"{name} & {f_k:.3f} & {a_match:.1f}\\% & {s_p1} & {s_p2} & {s_p3} \\\\"
 
     latex = [
         "\\begin{table*}[htbp]",
         "\\centering",
         "\\resizebox{\\textwidth}{!}{",
-        "\\begin{tabular}{l c c c c}",
+        "\\begin{tabular}{l c c c c c}",
         "\\toprule",
-        "\\textbf{Subset} & \\textbf{Fleiss $\\kappa$} & \\textbf{G27B vs Q32B-NT} & \\textbf{G27B vs Q32B-T} & \\textbf{Q32B-NT vs Q32B-T} \\\\",
+        "\\textbf{Subset} & \\textbf{Fleiss $\\kappa$} & \\textbf{All 3 Match} & \\textbf{G27B vs Q32B-NT} & \\textbf{G27B vs Q32B-T} & \\textbf{Q32B-NT vs Q32B-T} \\\\",
         "\\midrule"
     ]
 
@@ -226,14 +239,14 @@ def generate_single_latex_table(title, label, data, keys):
     latex.append("\\midrule")
 
     # BY LANGUAGE
-    latex.append("\\textit{By Language} & & & & \\\\")
+    latex.append("\\textit{By Language} & & & & & \\\\")
     for l in langs:
         subset = [r for r in data if r.get('lang') == l]
         latex.append(format_row(f"\\hspace{{1em}} {l.upper()}", get_metrics(subset, keys)))
     latex.append("\\midrule")
 
     # BY CATEGORY
-    latex.append("\\textit{By Category} & & & & \\\\")
+    latex.append("\\textit{By Category} & & & & & \\\\")
     for c in cats:
         subset = [r for r in data if r.get('category') == c]
         latex.append(format_row(f"\\hspace{{1em}} {c}", get_metrics(subset, keys)))
@@ -311,7 +324,7 @@ def main():
     keys_e = ('err_g', 'err_qnt', 'err_qt')
 
     table1 = generate_combined_latex_table(
-        title="Inter-Rater Agreement: Question Validity (Val.) vs Hallucination Detection (Err.) on All Data. Bolded values indicate the highest pairwise agreement in each row, while italicized values indicate the lowest.",
+        title="Inter-Rater Agreement: Question Validity (Val.) vs Hallucination Detection (Err.). Bolded values indicate the highest pairwise agreement in each row, while italicized values indicate the lowest.",
         label="tab:agreement_combined_all",
         data=all_data,
         keys_v=keys_v,
@@ -319,20 +332,6 @@ def main():
     )
     print(table1)
     print("\n" + "% " + "-" * 60 + "\n")
-
-    # ---------------------------------------------------------
-    # TABLE 2: Error Detection (Strictly Valid Questions Only)
-    # ---------------------------------------------------------
-    # Filter for items where ALL THREE raters agreed the question was valid
-    valid_only_data = [r for r in all_data if r['v_g'] and r['v_qnt'] and r['v_qt']]
-
-    table2 = generate_single_latex_table(
-        title="Inter-Rater Agreement: Hallucination Detection (Strictly Valid Questions Only). Bolded values indicate the highest pairwise agreement in each row, while italicized values indicate the lowest.",
-        label="tab:agreement_error_valid_only",
-        data=valid_only_data,
-        keys=keys_e
-    )
-    print(table2)
 
 
 if __name__ == "__main__":

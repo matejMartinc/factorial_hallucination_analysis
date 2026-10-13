@@ -108,6 +108,200 @@ def plot_combined_heatmap(model_dfs, title, filename, cmap="Reds", vmin=0, vmax=
     print(f">> Saved consolidated heatmap: {save_path}")
 
 
+def generate_exp_b_latex_table(all_data):
+    """
+    Generates a LaTeX table showing OVERALL Question Validity and Attack Success Rate
+    for English, Slovenian, and Both, across all model families and sizes.
+    Attack success rate is calculated on ALL data, not just valid questions.
+    """
+    print("\n" + "=" * 90)
+    print("EXPERIMENT B: OVERALL RESULTS LATEX TABLE")
+    print("=" * 90)
+
+    # Initialize LaTeX table string
+    latex_str = [
+        "\\begin{table*}[t]",
+        "\\centering",
+        "\\caption{Overall Question Validity and Attack Success Rate by Generator Model Size. Both metrics are calculated on all generated questions.}",
+        "\\label{tab:exp_b_overall}",
+        "\\begin{tabular}{ll ccc ccc}",
+        "\\toprule",
+        "& & \\multicolumn{3}{c}{\\textbf{Question Validity (\\%)}} & \\multicolumn{3}{c}{\\textbf{Attack Success Rate (\\%)}} \\\\",
+        "\\cmidrule(lr){3-5} \\cmidrule(lr){6-8}",
+        "\\textbf{Model} & \\textbf{Size} & \\textbf{EN} & \\textbf{SL} & \\textbf{All} & \\textbf{EN} & \\textbf{SL} & \\textbf{All} \\\\",
+        "\\midrule"
+    ]
+
+    def fmt(val):
+        return f"{val:.1f}" if pd.notna(val) else "-"
+
+    for idx, (model_name, df, size) in enumerate(all_data):
+        # The Student and Judge are fixed to the largest size for Exp B
+        base_subset = df[(df["student"] == size[-1]) & (df["judge"] == size[-1])].copy()
+
+        if base_subset.empty:
+            continue
+
+        # Add a midrule between different model families (except the first one)
+        if idx > 0:
+            latex_str.append("\\midrule")
+
+        for i, gen_size in enumerate(size):
+            gen_subset = base_subset[base_subset["generator"] == gen_size]
+            if gen_subset.empty:
+                continue
+
+            # --- 1. Question Validity (Calculated on ALL generated questions) ---
+            val_all = gen_subset["is_valid"].mean() * 100
+            val_en = gen_subset[gen_subset["lang"] == "en"]["is_valid"].mean() * 100
+            val_sl = gen_subset[gen_subset["lang"] == "sl"]["is_valid"].mean() * 100
+
+            # --- 2. Attack Success Rate (Calculated on ALL generated questions) ---
+            atk_all = gen_subset["has_error"].mean() * 100 if not gen_subset.empty else np.nan
+
+            en_subset = gen_subset[gen_subset["lang"] == "en"]
+            atk_en = en_subset["has_error"].mean() * 100 if not en_subset.empty else np.nan
+
+            sl_subset = gen_subset[gen_subset["lang"] == "sl"]
+            atk_sl = sl_subset["has_error"].mean() * 100 if not sl_subset.empty else np.nan
+
+            # Formatting the row
+            model_col = f"\\multirow{{{len(size)}}}{{*}}{{{model_name}}}" if i == 0 else ""
+
+            row_str = f"{model_col} & {gen_size} & {fmt(val_en)} & {fmt(val_sl)} & {fmt(val_all)} & {fmt(atk_en)} & {fmt(atk_sl)} & {fmt(atk_all)} \\\\"
+            latex_str.append(row_str)
+
+    # Close LaTeX table
+    latex_str.extend([
+        "\\bottomrule",
+        "\\end{tabular}",
+        "\\end{table*}"
+    ])
+
+    final_latex = "\n".join(latex_str)
+    print(final_latex)
+
+    # Optionally save to a .tex file
+    save_path = os.path.join(COMBINED_RESULTS_DIR, "ExpB_Overall_Table.tex")
+    with open(save_path, "w") as f:
+        f.write(final_latex)
+    print(f"\n>> Saved LaTeX table to: {save_path}")
+
+
+def generate_multiturn_advanced_table(df, turn_err_cols, valid_filter, table_type="standard"):
+    """
+    Advanced table generator for Multi-turn Degradation.
+    table_type: "standard" outputs normal rate.
+    "conditional" outputs cumulative snowball rate: P(Error_T | ANY Error_{<T}).
+    """
+    if df.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    langs = sorted(df['lang'].dropna().unique())
+    categories = sorted(df['category'].dropna().unique())
+
+    # Determine which columns to process based on table type
+    if table_type == "conditional":
+        # Drop Turn 1 since there is no prior turn to condition on
+        cols_to_process = turn_err_cols[1:]
+    else:
+        cols_to_process = turn_err_cols
+
+    data_cat_overall = {}
+    data_cat_lang = {}
+    data_overall_all = {}
+    data_lang_all = {}
+
+    for i, col in enumerate(cols_to_process):
+        v_col = col.replace("_error", "_valid")
+        col_df = df if valid_filter is None else df[df[v_col] == valid_filter].copy()
+
+        if table_type == "conditional":
+            # Find the original index of this column in the full list
+            orig_idx = turn_err_cols.index(col)
+
+            # Get a list of ALL previous turn columns
+            prev_cols = turn_err_cols[:orig_idx]
+            calc_col = f"{col}_cond"
+
+            # Create a mask: True if All previous turn had an error
+            prev_error_mask = col_df[prev_cols].all(axis=1) == True
+
+            # Calculate conditional error ONLY where the mask is True
+            col_df[calc_col] = np.where(prev_error_mask, col_df[col].astype(float), np.nan)
+        else:
+            calc_col = col
+
+        data_cat_overall[col] = col_df.groupby("category")[calc_col].mean() * 100
+        data_cat_lang[col] = col_df.groupby(["category", "lang"])[calc_col].mean() * 100
+        data_overall_all[col] = col_df[calc_col].mean() * 100
+        data_lang_all[col] = col_df.groupby("lang")[calc_col].mean() * 100
+
+    # Format the column names for the heatmap so they accurately reflect the math
+    if table_type == "conditional":
+        clean_cols = []
+        for c in cols_to_process:
+            t_num = turn_err_cols.index(c) + 1
+            clean_cols.append(f"Turn {t_num} | T<{t_num}")
+    else:
+        clean_cols = [c.replace("_error", "").replace("_", " ") for c in cols_to_process]
+
+    deviations = []
+    for col in cols_to_process:
+        for cat in categories:
+            ov = data_cat_overall[col].get(cat, np.nan)
+            for l in langs:
+                lv = data_cat_lang[col].get((cat, l), np.nan)
+                if pd.notna(ov) and pd.notna(lv):
+                    deviations.append(abs(lv - ov))
+    avg_dev = np.mean(deviations) if deviations else 0
+
+    index_order = categories + ["OVERALL"]
+    num_df = pd.DataFrame(index=index_order, columns=clean_cols, dtype=float)
+    annot_df = pd.DataFrame(index=index_order, columns=clean_cols, dtype=object)
+
+    for col, clean_col in zip(cols_to_process, clean_cols):
+        for cat in categories:
+            ov = data_cat_overall[col].get(cat, np.nan)
+            num_df.loc[cat, clean_col] = ov
+
+            if pd.isna(ov):
+                annot_df.loc[cat, clean_col] = "N/A"
+            else:
+                lines = [f"{fmt_val(ov)}%"]
+                for l in langs:
+                    lv = data_cat_lang[col].get((cat, l), np.nan)
+                    prefix = "E" if l == "en" else ("S" if l == "sl" else l)
+                    if pd.isna(lv):
+                        lines.append(f"{prefix} N/A")
+                    else:
+                        if abs(lv - ov) > avg_dev:
+                            lines.append(f"$\\mathbf{{{prefix}\\ {fmt_val(lv)}\\%}}$")
+                        else:
+                            lines.append(f"{prefix} {fmt_val(lv)}%")
+                annot_df.loc[cat, clean_col] = "\n".join(lines)
+
+        ov_all = data_overall_all[col]
+        num_df.loc["OVERALL", clean_col] = ov_all
+
+        if pd.isna(ov_all):
+            annot_df.loc["OVERALL", clean_col] = "N/A"
+        else:
+            lines = [f"$\\mathit{{{fmt_val(ov_all)}\\%}}$"]
+            for l in langs:
+                lv_all = data_lang_all[col].get(l, np.nan)
+                prefix = "E" if l == "en" else ("S" if l == "sl" else l)
+                if pd.isna(lv_all):
+                    lines.append(f"{prefix} N/A")
+                else:
+                    lines.append(f"{prefix} {fmt_val(lv_all)}%")
+            annot_df.loc["OVERALL", clean_col] = "\n".join(lines)
+
+    return num_df, annot_df
+
+
+
+
 # ==========================================
 # ADVANCED TABLE GENERATORS
 # ==========================================
@@ -392,102 +586,122 @@ def generate_exp_c_advanced_table(pivot_df, size, target_col_prefix="has_error")
     return num_df, annot_df
 
 
-def generate_multiturn_advanced_table(df, turn_err_cols, valid_filter, table_type="standard"):
+def generate_multiturn_latex_table(all_mt_data):
     """
-    Advanced table generator for Multi-turn Degradation.
-    table_type: "standard" outputs normal rate. "conditional" outputs P(Error_T | Error_{T-1}).
+    Generates a LaTeX table showing Standard Hallucination Rates and
+    Conditional Probabilities across conversational turns for EN, SL, and All.
     """
-    if df.empty:
-        return pd.DataFrame(), pd.DataFrame()
+    print("\n" + "=" * 90)
+    print("MULTI-TURN DEGRADATION: OVERALL RESULTS LATEX TABLE")
+    print("=" * 90)
 
-    langs = sorted(df['lang'].dropna().unique())
-    categories = sorted(df['category'].dropna().unique())
+    if not all_mt_data:
+        print("No multi-turn data found.")
+        return
 
-    # Determine which columns to process based on table type
-    if table_type == "conditional":
-        # Drop Turn 1 since there is no prior turn
-        cols_to_process = turn_err_cols[1:]
-    else:
-        cols_to_process = turn_err_cols
+    # Dynamically find the maximum number of turns across all models
+    max_turns = 0
+    for _, df, _ in all_mt_data:
+        turn_cols = [c for c in df.columns if c.endswith("_error")]
+        max_turns = max(max_turns, len(turn_cols))
 
-    data_cat_overall = {}
-    data_cat_lang = {}
-    data_overall_all = {}
-    data_lang_all = {}
+    if max_turns < 2:
+        print("Not enough turns to calculate conditional probabilities.")
+        return
 
-    for i, col in enumerate(cols_to_process):
-        v_col = col.replace("_error", "_valid")
-        col_df = df if valid_filter is None else df[df[v_col] == valid_filter].copy()
+    turns = list(range(1, max_turns + 1))
 
-        if table_type == "conditional":
-            # Find the original index of this column in the full list
-            orig_idx = turn_err_cols.index(col)
-            prev_col = turn_err_cols[orig_idx - 1]
-            calc_col = f"{col}_cond"
-            col_df[calc_col] = np.where(col_df[prev_col] == True, col_df[col].astype(float), np.nan)
-        else:
-            calc_col = col
+    # Build dynamic column headers
+    std_cols_tex = " & ".join([f"\\textbf{{T{t}}}" for t in turns])
+    cond_cols_tex = " & ".join([f"\\textbf{{T{t}|T$_{{< {t} }}$}}" for t in turns[1:]])
 
-        data_cat_overall[col] = col_df.groupby("category")[calc_col].mean() * 100
-        data_cat_lang[col] = col_df.groupby(["category", "lang"])[calc_col].mean() * 100
-        data_overall_all[col] = col_df[calc_col].mean() * 100
-        data_lang_all[col] = col_df.groupby("lang")[calc_col].mean() * 100
+    num_std_cols = len(turns)
+    num_cond_cols = len(turns) - 1
+    total_align = "c" * num_std_cols + " " + "c" * num_cond_cols
 
-    clean_cols = [c.replace("_error", "").replace("_", " ") for c in cols_to_process]
+    latex_str = [
+        "\\begin{table*}[t]",
+        "\\centering",
+        "\\caption{Multi-Turn Epistemic Degradation. Shows standard hallucination rates per turn and the cumulative snowball probability: "
+        "the likelihood of hallucinating in Turn $t$ given that a hallucination occurred in ANY prior turn.}",
+        "\\label{tab:multiturn_overall}",
+        f"\\begin{{tabular}}{{ll {total_align}}}",
+        "\\toprule",
+        f"& & \\multicolumn{{{num_std_cols}}}{{c}}{{\\textbf{{Standard Hallucination Rate (\\%)}}}} & \\multicolumn{{{num_cond_cols}}}{{c}}{{\\textbf{{Conditional Rate $P(E_t | E_{{<t}})$ (\\%)}}}} \\\\",
+        f"\\cmidrule(lr){{3-{2 + num_std_cols}}} \\cmidrule(lr){{{3 + num_std_cols}-{2 + num_std_cols + num_cond_cols}}}",
+        f"\\textbf{{Model (Size)}} & \\textbf{{Lang}} & {std_cols_tex} & {cond_cols_tex} \\\\",
+        "\\midrule"
+    ]
 
-    deviations = []
-    for col in cols_to_process:
-        for cat in categories:
-            ov = data_cat_overall[col].get(cat, np.nan)
-            for l in langs:
-                lv = data_cat_lang[col].get((cat, l), np.nan)
-                if pd.notna(ov) and pd.notna(lv):
-                    deviations.append(abs(lv - ov))
-    avg_dev = np.mean(deviations) if deviations else 0
+    def fmt(val):
+        return f"{val:.1f}" if pd.notna(val) else "-"
 
-    index_order = categories + ["OVERALL"]
-    num_df = pd.DataFrame(index=index_order, columns=clean_cols, dtype=float)
-    annot_df = pd.DataFrame(index=index_order, columns=clean_cols, dtype=object)
+    for idx, (model_name, df, size) in enumerate(all_mt_data):
+        if df.empty:
+            continue
 
-    for col, clean_col in zip(cols_to_process, clean_cols):
-        for cat in categories:
-            ov = data_cat_overall[col].get(cat, np.nan)
-            num_df.loc[cat, clean_col] = ov
+        model_label = f"{model_name} ({size[-1]})"
 
-            if pd.isna(ov):
-                annot_df.loc[cat, clean_col] = "N/A"
+        if idx > 0:
+            latex_str.append("\\midrule")
+
+        # Process each language group: English, Slovenian, All
+        for lang_idx, lang in enumerate(["en", "sl", "all"]):
+            if lang == "all":
+                sub_df = df
+                lang_label = "\\textbf{All}"
             else:
-                lines = [f"{fmt_val(ov)}%"]
-                for l in langs:
-                    lv = data_cat_lang[col].get((cat, l), np.nan)
-                    prefix = "E" if l == "en" else ("S" if l == "sl" else l)
-                    if pd.isna(lv):
-                        lines.append(f"{prefix} N/A")
-                    else:
-                        if abs(lv - ov) > avg_dev:
-                            lines.append(f"$\\mathbf{{{prefix}\\ {fmt_val(lv)}\\%}}$")
-                        else:
-                            lines.append(f"{prefix} {fmt_val(lv)}%")
-                annot_df.loc[cat, clean_col] = "\n".join(lines)
+                sub_df = df[df["lang"] == lang]
+                lang_label = lang.upper()
 
-        ov_all = data_overall_all[col]
-        num_df.loc["OVERALL", clean_col] = ov_all
-
-        if pd.isna(ov_all):
-            annot_df.loc["OVERALL", clean_col] = "N/A"
-        else:
-            lines = [f"$\\mathit{{{fmt_val(ov_all)}\\%}}$"]
-            for l in langs:
-                lv_all = data_lang_all[col].get(l, np.nan)
-                prefix = "E" if l == "en" else ("S" if l == "sl" else l)
-                if pd.isna(lv_all):
-                    lines.append(f"{prefix} N/A")
+            # 1. Standard Rates
+            std_rates = []
+            for t in turns:
+                col = f"Turn_{t}_error"
+                if col in sub_df.columns and not sub_df.empty:
+                    std_rates.append(sub_df[col].mean() * 100)
                 else:
-                    lines.append(f"{prefix} {fmt_val(lv_all)}%")
-            annot_df.loc["OVERALL", clean_col] = "\n".join(lines)
+                    std_rates.append(np.nan)
 
-    return num_df, annot_df
+            # 2. Cumulative Snowball Rates: P(Error_t | ANY Error_<t)
+            cond_rates = []
+            for t in turns[1:]:
+                curr_col = f"Turn_{t}_error"
+                # Get a list of all columns prior to the current turn 't'
+                prev_cols = [f"Turn_{k}_error" for k in range(1, t)]
 
+                # Check if all these columns actually exist in the dataframe
+                if all(c in sub_df.columns for c in
+                       prev_cols) and curr_col in sub_df.columns and not sub_df.empty:
+                    # Filter where ALL previous turn had a hallucination
+                    cond_df = sub_df[sub_df[prev_cols].all(axis=1) == True]
+                    cond_rates.append(cond_df[curr_col].mean() * 100 if not cond_df.empty else np.nan)
+                else:
+                    cond_rates.append(np.nan)
+
+            # Format the row
+            model_col = f"\\multirow{{3}}{{*}}{{{model_label}}}" if lang_idx == 0 else ""
+            std_str = " & ".join([fmt(v) for v in std_rates])
+            cond_str = " & ".join([fmt(v) for v in cond_rates])
+
+            row_str = f"{model_col} & {lang_label} & {std_str} & {cond_str} \\\\"
+            latex_str.append(row_str)
+
+    # Close LaTeX table
+    latex_str.extend([
+        "\\bottomrule",
+        "\\end{tabular}",
+        "\\end{table*}"
+    ])
+
+    final_latex = "\n".join(latex_str)
+    print(final_latex)
+
+    # Save to file
+    save_path = os.path.join(COMBINED_RESULTS_DIR, "MultiTurn_Overall_Table.tex")
+    with open(save_path, "w") as f:
+        f.write(final_latex)
+    print(f"\n>> Saved LaTeX table to: {save_path}")
 
 # ==========================================
 # DATA LOADING
@@ -619,6 +833,7 @@ def run_experiment_b_all_models(all_data):
             print(annot_df.to_markdown())
             combined_panels.append((model_name, num_df, annot_df))
 
+        # 1. Output the detailed granular heatmaps
         plot_combined_heatmap(
             combined_panels,
             title="",
@@ -626,6 +841,9 @@ def run_experiment_b_all_models(all_data):
             cmap="Reds",
             annot_fontsize=16
         )
+
+        # Generate the overall LaTeX table for Exp B
+        generate_exp_b_latex_table(all_phase3_data)
 
 
 def run_experiment_c_all_models(all_data):
@@ -659,7 +877,7 @@ def run_experiment_c_all_models(all_data):
             combined_panels,
             title="",
             filename=f"ExpC_Judge_Agreement_{mode_name}.png",
-            cmap="Greens",
+            cmap="Oranges",
             vmin=0,
             vmax=100,
             annot_fontsize=16
@@ -755,5 +973,8 @@ if __name__ == "__main__":
 
     # 4. Multi-Turn Degradation
     run_multiturn_all_models(all_multiturn_data)
+
+    # Generate the overall LaTeX table for Multi-Turn
+    generate_multiturn_latex_table(all_multiturn_data)
 
     print(f"\nAll analyses complete! Consolidated multi-model heatmaps saved to: '{COMBINED_RESULTS_DIR}/'")
