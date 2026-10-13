@@ -165,7 +165,7 @@ To validate evaluator reliability and ensure evaluations are not artifacts of a 
 
 ### 3. Compute Judge Agreement Metrics
 
-Compute multi-rater agreement (Fleiss' $\kappa$) across all three judges and pairwise agreement (Cohen's $\kappa$ and Match %) broken down by language and question category:
+Compute multi-rater agreement (Fleiss' kappa) across all three judges and pairwise agreement (Cohen's kappa and Match) broken down by language and question category:
 
     python get_cross_eval_judge_agreement.py
 
